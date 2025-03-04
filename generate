@@ -1,0 +1,159 @@
+#!/bin/bash
+
+# Use this script to create a cross compiler
+
+# Immediately exit if error occurs
+set -e
+
+# Parse parameters
+# $1: source directory
+# $2: output toolchain
+
+if [ $# -lt 2 ]
+then
+    echo "Missing parameters"
+    exit 1
+fi
+
+SOURCE_DIR=$(readlink -f $1)
+OUTPUT_DIR=$(readlink -f $2)
+BUILD_DIR=$SOURCE_DIR
+
+if [ $# -ge 3 ]
+then
+    BUILD_DIR=$(readlink -f $3)
+fi
+
+# Sanitize source directory
+if [ ! -d $SOURCE_DIR ]
+then
+    echo "The $SOURCE_DIR is not a directory"
+    exit 1
+fi
+
+if [ ! -d $BUILD_DIR ]
+then
+    echo "The $BUILD_DIR is not a directory"
+    exit 1
+fi
+
+LOGFILE=$BUILD_DIR/.build.log
+
+rm -f $LOGFILE
+
+# Expected content of source directory
+
+# binutils-2.44.tar.xz
+# cloog-0.18.1.tar.gz
+# gcc-14.2.0.tar.xz
+# glibc-2.41.tar.xz
+# gmp-6.3.0.tar.xz
+# isl-0.24.tar.bz2
+# linux-6.0.1.tar.xz
+# mpc-1.3.1.tar.gz
+# mpfr-4.2.1.tar.xz
+
+SOURCE_FILES=(binutils-2.44.tar.xz cloog-0.18.1.tar.gz gcc-14.2.0.tar.xz glibc-2.41.tar.xz gmp-6.3.0.tar.xz isl-0.24.tar.bz2 linux-6.0.1.tar.xz mpc-1.3.1.tar.gz mpfr-4.2.1.tar.xz)
+
+for file in ${SOURCE_FILES[@]}
+do
+    echo -en "Checking $file..." | tee -a $LOGFILE
+    if [ ! -f $SOURCE_DIR/$file ]
+    then
+        echo " is missing!" | tee -a $LOGFILE
+        exit 1
+    else
+        echo " OK" | tee -a $LOGFILE
+    fi
+done
+
+# Set PATH for new tools
+export PATH=$OUTPUT_DIR/bin:$PATH
+# Set target triplet to build for powerpc (default)
+export TARGET_TRIPLET=powerpc-glus-linux-gnu
+# The make uses maximum number of processors to build
+export MAKEFLAGS=-j$(nproc)
+
+# Change working directory to $SOURCE_DIR
+cd $BUILD_DIR
+
+# Extract all $SOURCE_FILES
+for file in ${SOURCE_FILES[@]}
+do
+    echo -en "Decompressing $file..." | tee -a $LOGFILE
+    tar xf $SOURCE_DIR/$file
+    echo " OK" | tee -a $LOGFILE
+done
+
+# Enter into extracted gcc to add dependencies
+cd $BUILD_DIR/gcc-14.2.0
+ln -s ../cloog-0.18.1 cloog
+ln -s ../gmp-6.3.0 gmp
+ln -s ../isl-0.24 isl
+ln -s ../mpc-1.3.1 mpc
+ln -s ../mpfr-4.2.1 mpfr
+
+# Step 1: Binutils
+echo -en "Building binutils..." | tee -a $LOGFILE
+cd $BUILD_DIR
+rm -rf build-binutils
+mkdir build-binutils
+cd build-binutils
+../binutils-2.44/configure --prefix=$OUTPUT_DIR --target=$TARGET_TRIPLET --disable-multilib
+make
+make install
+echo " OK" | tee -a $LOGFILE
+
+# Step 2: Linux kernel headers
+echo -en "Installing Linux kernel headers..." | tee -a $LOGFILE
+cd $BUILD_DIR/linux-6.0.1
+make ARCH=powerpc INSTALL_HDR_PATH=$OUTPUT_DIR/$TARGET_TRIPLET headers_install
+echo " OK" | tee -a $LOGFILE
+
+# Step 3: C/C++ compilers
+echo -en "Building only C/C++ compilers..." | tee -a $LOGFILE
+cd $BUILD_DIR
+rm -rf build-gcc
+mkdir build-gcc
+cd build-gcc
+../gcc-14.2.0/configure --prefix=$OUTPUT_DIR --target=$TARGET_TRIPLET --disable-multilib --disable-libsanitizer --enable-languages=c,c++
+make all-gcc
+make install-gcc
+echo " OK" | tee -a $LOGFILE
+
+# Step 4: Standard C library headers and Startup files
+echo -en "Installing standard C library headers and Startup files..." | tee -a $LOGFILE
+cd $BUILD_DIR
+rm -rf build-glibc
+mkdir build-glibc
+cd build-glibc
+../glibc-2.41/configure --prefix=$OUTPUT_DIR/$TARGET_TRIPLET --build=$MACHTYPE --host=$TARGET_TRIPLET --target=$TARGET_TRIPLET --with-headers=$OUTPUT_DIR/$TARGET_TRIPLET/include --disable-multilib libc_cv_forced_unwind=yes
+make install-bootstrap-headers=yes install-headers
+make csu/subdir_lib
+install csu/crt1.o csu/crti.o csu/crtn.o $OUTPUT_DIR/$TARGET_TRIPLET/lib
+$TARGET_TRIPLET-gcc -nostdlib -nostartfiles -shared -x c /dev/null -o $OUTPUT_DIR/$TARGET_TRIPLET/lib/libc.so
+touch $OUTPUT_DIR/$TARGET_TRIPLET/include/gnu/stubs.h
+echo " OK" | tee -a $LOGFILE
+
+# Step 5: Compiler support library
+echo -en "Building compiler support library (libgcc)..." | tee -a $LOGFILE
+cd $BUILD_DIR/build-gcc
+make all-target-libgcc
+make install-target-libgcc
+echo " OK" | tee -a $LOGFILE
+
+# Step 6: Standard C library
+echo -en "Building standard C library..." | tee -a $LOGFILE
+cd $BUILD_DIR/build-glibc
+make
+make install
+echo " OK" | tee -a $LOGFILE
+
+# Step 7: Standard C++ library
+echo -en "Building standard C++ library..." | tee -a $LOGFILE
+cd $BUILD_DIR/build-gcc
+make
+make install
+echo " OK" | tee -a $LOGFILE
+
+echo "Build cross-compiler for $TARGET_TRIPLET successfully!" | tee -a $LOGFILE
