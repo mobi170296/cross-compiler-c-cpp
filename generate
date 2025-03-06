@@ -70,7 +70,8 @@ done
 # Set PATH for new tools
 export PATH=$OUTPUT_DIR/bin:$PATH
 # Set target triplet to build for powerpc (default)
-# export TARGET_TRIPLET=powerpc-glus-linux-gnu
+export GLUS_TRIPLET=powerpc-glus-linux-gnu
+export GLUS_ARCH=powerpc
 # For now, use config file instead
 CONFIG_FILE=$(dirname $(readlink -f $0))/.config
 if [ -f $CONFIG_FILE ]
@@ -107,7 +108,7 @@ cd $BUILD_DIR
 rm -rf build-binutils
 mkdir build-binutils
 cd build-binutils
-../binutils-2.44/configure --prefix=$OUTPUT_DIR --target=$TARGET_TRIPLET --disable-multilib
+../binutils-2.44/configure --prefix=$OUTPUT_DIR --target=$GLUS_TRIPLET --disable-multilib
 make
 make install
 echo " OK" | tee -a $LOGFILE
@@ -115,7 +116,7 @@ echo " OK" | tee -a $LOGFILE
 # Step 2: Linux kernel headers
 echo -en "Installing Linux kernel headers..." | tee -a $LOGFILE
 cd $BUILD_DIR/linux-6.13.5
-make ARCH=$TARGET_ARCH INSTALL_HDR_PATH=$OUTPUT_DIR/$TARGET_TRIPLET headers_install
+make ARCH=$GLUS_ARCH INSTALL_HDR_PATH=$OUTPUT_DIR/$GLUS_TRIPLET headers_install
 echo " OK" | tee -a $LOGFILE
 
 # Step 3: C/C++ compilers
@@ -124,7 +125,7 @@ cd $BUILD_DIR
 rm -rf build-gcc
 mkdir build-gcc
 cd build-gcc
-../gcc-14.2.0/configure --prefix=$OUTPUT_DIR --target=$TARGET_TRIPLET --disable-multilib --disable-libsanitizer --enable-languages=c,c++
+../gcc-14.2.0/configure --prefix=$OUTPUT_DIR --target=$GLUS_TRIPLET --disable-multilib --disable-libsanitizer --enable-languages=c,c++
 make all-gcc
 make install-gcc
 echo " OK" | tee -a $LOGFILE
@@ -135,12 +136,12 @@ cd $BUILD_DIR
 rm -rf build-glibc
 mkdir build-glibc
 cd build-glibc
-../glibc-2.41/configure --prefix=$OUTPUT_DIR/$TARGET_TRIPLET --build=$MACHTYPE --host=$TARGET_TRIPLET --target=$TARGET_TRIPLET --with-headers=$OUTPUT_DIR/$TARGET_TRIPLET/include --disable-multilib libc_cv_forced_unwind=yes
+../glibc-2.41/configure --prefix=$OUTPUT_DIR/$GLUS_TRIPLET --build=$MACHTYPE --host=$GLUS_TRIPLET --target=$GLUS_TRIPLET --with-headers=$OUTPUT_DIR/$GLUS_TRIPLET/include --disable-multilib libc_cv_forced_unwind=yes
 make install-bootstrap-headers=yes install-headers
 make csu/subdir_lib
-install csu/crt1.o csu/crti.o csu/crtn.o $OUTPUT_DIR/$TARGET_TRIPLET/lib
-$TARGET_TRIPLET-gcc -nostdlib -nostartfiles -shared -x c /dev/null -o $OUTPUT_DIR/$TARGET_TRIPLET/lib/libc.so
-touch $OUTPUT_DIR/$TARGET_TRIPLET/include/gnu/stubs.h
+install csu/crt1.o csu/crti.o csu/crtn.o $OUTPUT_DIR/$GLUS_TRIPLET/lib
+$GLUS_TRIPLET-gcc -nostdlib -nostartfiles -shared -x c /dev/null -o $OUTPUT_DIR/$GLUS_TRIPLET/lib/libc.so
+touch $OUTPUT_DIR/$GLUS_TRIPLET/include/gnu/stubs.h
 echo " OK" | tee -a $LOGFILE
 
 # Step 5: Compiler support library
@@ -164,4 +165,4 @@ make
 make install
 echo " OK" | tee -a $LOGFILE
 
-echo "Build cross-compiler for $TARGET_TRIPLET successfully!" | tee -a $LOGFILE
+echo "Build cross-compiler for $GLUS_TRIPLET successfully!" | tee -a $LOGFILE
